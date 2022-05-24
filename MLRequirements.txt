@@ -1,0 +1,10 @@
+matplotlib==3.5.2
+numpy==1.22.4
+openpyxl==3.0.10
+pandas==1.4.2
+tensorflow==2.9.1
+keras==2.9.0
+plotly==5.8.0
+pyodbc==4.0.32
+os-sys==2.1.4
+scikit-learn==1.1.1
