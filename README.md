@@ -10,3 +10,5 @@
 
 3.Sen jälkeen aja:
 ```pip install -r MLReguirements.txt```
+
+4.Käy kahvilla latauksessa voi kestää hetki
