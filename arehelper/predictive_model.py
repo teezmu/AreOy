@@ -10,7 +10,6 @@ def get_files():
     import pandas as pd
     ## DATA FROM SQL
     import pyodbc
-    print('connecting...')
     conn = pyodbc.connect('Driver={SQL Server};'
                       'Server=sqlserver7w7bbd5rlwweu.database.windows.net;'
                       'Database=AreIoTSQLSensorData;'
@@ -19,7 +18,6 @@ def get_files():
                      'Pwd=Toukokuu2022!;')
 
     cursor = conn.cursor()
-    print('Connected!')
     sqlmuseo = """SELECT * FROM museotesti
                       WHERE Apartment = 1 AND date > '2022-01-01' ORDER BY date DESC"""
     dfmuseo = pd.read_sql(sqlmuseo, conn)
@@ -46,7 +44,7 @@ def create_sensordf(rule, prints=False):
     
     #####################################################
     if prints:
-        print(f'Found {len(sensorF1)} sensors:\n{sensorF1}\n')
+        print(f'Found {len(sensorF1)} sensors')
         print(f'Dataframe names:')
     #####################################################
     
@@ -86,9 +84,10 @@ def process_data_to_ml(df, conn, sää):
     devitations = dfsää.std(numeric_only=True)
     
     columns = list(dfsää.columns)
-    df = scale_data(dfsää, means, devitations)
+    df = arehelper.predictive_model.scale_data(dfsää, means, devitations)
     
     return df, means, devitations
+
 
 
 def scale_data(df, mean, deviation):
@@ -160,119 +159,85 @@ def prepare_data(df):
 
 
 
-def train_ML(df, conn, sää, return_parameters=True, prints=False, save_model=False, train=True):
-    import joblib
-    df, mean, std = process_data_to_ml(df, conn, sää)
-    df = df.dropna()
-    
+def train_ML(return_models=False, prints=False, save_model=False, train=True):
+    import joblib  
+    museo, sää, conn = arehelper.predictive_model.get_files()
     if train:
-        trainset = df.sample(frac=0.8)
-        testset = df.drop(trainset.index)
-        X_train, y_train = trainset.drop(columns=['Kosteus', 'Lampotila']), trainset['Kosteus']
-        X_test, y_test = testset.drop(columns=['Kosteus', 'Lampotila']), testset['Kosteus']
-        # RandomForestRegressor
-        from sklearn.ensemble import RandomForestRegressor
-        rand_regr = RandomForestRegressor(n_estimators = 1000, random_state = 42)
-        rand_regr.fit(X_train, y_train)
-        # Prediction 
-        rand_predictions_scaled = rand_regr.predict(X_test)
-        # Inverse scaling
-        rand_predictions = (rand_predictions_scaled * std['Kosteus']) + mean['Kosteus']
-        #rand_actuals = (y_test * std) + mean
+        # Timer
+        import time
+        start = time.time()
+        
+        sensor = arehelper.predictive_model.create_sensordf('1min', prints=False)
+        c = 1
+        for s in sensor.keys():
+            print(f'Training models: {c}/{len(list(sensor))}\n')
+            print(f'Sensor: {s}')
+            sensordf = sensor[s].dropna()
+            df, mean, std = arehelper.predictive_model.process_data_to_ml(sensordf, conn, sää)
+            
+            trainset = df.sample(frac=0.8)
+            testset = df.drop(trainset.index)
+            X_train, y_train = trainset.drop(columns=['Kosteus', 'Lampotila']), trainset['Kosteus']
+            X_test, y_test = testset.drop(columns=['Kosteus', 'Lampotila']), testset['Kosteus']
+            #X_train = X_train.to_numpy()
+            #X_test = X_test.to_numpy()
+            # RandomForestRegressor
+            from sklearn.ensemble import RandomForestRegressor
+            rand_regr = RandomForestRegressor(n_estimators = 1000, random_state = 42)
+            rand_regr.fit(X_train, y_train)
+            # Prediction 
+            rand_predictions_scaled = rand_regr.predict(X_test)
+            # Inverse scaling
+            rand_predictions = (rand_predictions_scaled * std['Kosteus']) + mean['Kosteus']
+            #rand_actuals = (y_test * std) + mean
+            actuals = (y_test * std.Kosteus) + mean.Kosteus
+            c+=1
+            if save_model:
+                name = '/['+s+']random_forest.joblib'
+                joblib.dump(rand_regr, './Models'+ name)
     
-        # DecisionTreeRegressor
-        from sklearn.tree import DecisionTreeRegressor
-        dec_regr = DecisionTreeRegressor(random_state=0)
-        dec_regr.fit(X_train, y_train)
-         # Prediction 
-        dec_predictions_scaled = dec_regr.predict(X_test)
-        # Inverse scaling
-        dec_predictions = (dec_predictions_scaled * std['Kosteus']) + mean['Kosteus']
-        
-        actuals = (y_test * std.Kosteus) + mean.Kosteus
     
-    if prints:
-        test_df = pd.DataFrame({'Rand Predictions': rand_predictions,
-                               'Rand Actuals': actuals,
-                               'Rand Error': (rand_predictions-actuals),
-                                'Dec Predictions': dec_predictions,
-                               'Dec Actuals': actuals,
-                               'Dec Error': (dec_predictions-actuals),
-                               'Ridge Predictions': ridge_predictions,
-                               'Ridge Actuals': actuals,
-                               'Ridge Error': (ridge_predictions-actuals),
-                               'Lasso Predictions': lasso_predictions,
-                               'Lasso Actuals': actuals,
-                               'Lasso Error': (lasso_predictions-actuals)})
-        
-        print('Random Forest Regression:\n')
-        print('Max error < 0:', test_df['Rand Error'].min())
-        print('Max error > 0:', test_df['Rand Error'].max())
-        print('Avg error:', test_df['Rand Error'].mean())
-        
-        print('\nDecision Tree Regression:\n')
-        print('Max error < 0:', test_df['Dec Error'].min())
-        print('Max error > 0:', test_df['Dec Error'].max())
-        print('Avg error:', test_df['Dec Error'].mean())
-        
-        print('\Ridge Regression:\n')
-        print('Max error < 0:', test_df['Ridge Error'].min())
-        print('Max error > 0:', test_df['Ridge Error'].max())
-        print('Avg error:', test_df['Ridge Error'].mean())
-        
-        print('\nLasso Regression:\n')
-        print('Max error < 0:', test_df['Lasso Error'].min())
-        print('Max error > 0:', test_df['Lasso Error'].max())
-        print('Avg error:', test_df['Lasso Error'].mean())
-        
-        #Plot results
-        import matplotlib.pyplot as plt        
-        plt.figure()
-        plt.plot(test_df['Rand Predictions'][:100], label='Rand Predictions')
-        plt.plot(test_df['Rand Actuals'][:100], label='Rand Actuals')
-        plt.grid(True)
-        #plt.ylim([1,22])
-        plt.legend()
-        
-        plt.figure()
-        plt.plot(test_df['Dec Predictions'][:100], label='Dec Predictions')
-        plt.plot(test_df['Dec Actuals'][:100], label='Dec Actuals')
-        plt.grid(True)
-        plt.legend()
-        
-        plt.figure()
-        plt.plot(test_df['Ridge Predictions'][:100], label='Ridge Predictions')
-        plt.plot(test_df['Ridge Actuals'][:100], label='Ridge Actuals')
-        plt.grid(True)
-        plt.legend()
-        
-        plt.figure()
-        plt.plot(test_df['Lasso Predictions'][:100], label='Lasso Predictions')
-        plt.plot(test_df['Lasso Actuals'][:100], label='Lasso Actuals')
-        plt.grid(True)
-        plt.legend()
-        
-        return test_df
-        
-    if save_model:
-        # save
-        joblib.dump(rand_regr, "./random_forest.joblib")
-        joblib.dump(dec_regr, "./decision_tree.joblib")
-        
-    if return_parameters:
-        rand_regr = joblib.load("./random_forest.joblib")
-        dec_regr = joblib.load("./decision_tree.joblib")
+            test_df = pd.DataFrame({'Rand Predictions': rand_predictions,
+                                   'Rand Actuals': actuals,
+                                   'Rand Error': (rand_predictions-actuals),
+                                   })
+            if prints:
 
-        return dec_regr, rand_regr, mean, std
+                print('\nRandom Forest Regression:')
+                print('Max error < 0:', test_df['Rand Error'].min())
+                print('Max error > 0:', test_df['Rand Error'].max())
+                print('Avg error:', test_df['Rand Error'].mean())
+            
+                #Plot results
+                import matplotlib.pyplot as plt        
+                plt.figure()
+                plt.plot(test_df['Rand Predictions'][100:200], label='Rand Predictions')
+                plt.plot(test_df['Rand Actuals'][100:200], label='Rand Actuals')
+                plt.grid(True)
+                plt.ylim([25,45])
+                plt.legend()
+                plt.show()
+            
+            print(f'Model {s} saved!')
+        print(f'\nTotal training time: {round((time.time())-start,0)} seconds\n')
+        
     
-    
-def predict_museo_hum(df_list, figure=False):
-    print('Viimeisin datapiste:')
-    print(df_list[0]['Date'].max())
+def predict_museo_hum(figure=False):
+    import time
+    import joblib
+    start = time.time()
+    # Luodaan datasetit jokaiselle sensorille
+    df = arehelper.predictive_model.create_sensordf('1min', prints=False)
+    # Lisätään listaan kaikkien sensoreiden datasettien nimet
+    sensordf_list = []
+    for s in range(0, len(list(df))):
+        sensordf_list.append(list(df)[s])    
     # SQL Connection
-    museo, sää, conn = get_files()
+    museo, sää, conn = arehelper.predictive_model.get_files()
      
-    # Sääennustukset
+        
+    # Sääennustukset  #  
+    ###################
     sqlennustus = """SELECT * FROM weatherforecasts WHERE place = 'Jyväskylä, Keskusta'"""
     dfennustus = pd.read_sql(sqlennustus, conn)
     dfennustus['timestamp'] = pd.to_datetime(dfennustus['timestamp'])
@@ -280,60 +245,57 @@ def predict_museo_hum(df_list, figure=False):
     enn2h = dfennustus['timestamp'] + pd.DateOffset(hours=2)
     enn3h = dfennustus['timestamp'] + pd.DateOffset(hours=3)
     enn6h = dfennustus['timestamp'] + pd.DateOffset(hours=6)
-    print(f'Ennustukset ajoille: {enn2h} \n {enn3h} \n {enn6h}')
+    print(f'Ennustukset ajoille: {enn2h.values} \n {enn3h.values} \n {enn6h.values}\n')
     
-    dec_predictions_list = []
-    rand_predictions_list = []
-    for i in range(0, len(df_list)):
-        # Train and get models
-        dec_reg, rand_reg, mean, std = arehelper.predictive_model.train_ML(df_list[i], conn, sää, return_parameters=True, prints=False, train=False, save_model=False)
-    
+    # Mallien ennustus loop #
+    #########################
+    # loopataan sensorilista läpi ja käytetään oikeaa modelia oikean sensorin kanssa
+    # Lista ennustuksille
+    rand_predictions_dict = {}
+    for sens in sensordf_list:
+        print('\nVuorossa sensori: ',sens, '\n')
+        name = "Models/["+sens+"]random_forest.joblib"
+        model = joblib.load(name)
+        sensordf = df[sens].dropna()
+        # Viimeisin sensorilta saatu piste
+        print('\nViimeisin datapiste:')
+        print(sensordf['Date'].max())
+        
+        # Scaalaukseen tarvittavat arvot 
+        sensordf, mean, std = arehelper.predictive_model.process_data_to_ml(sensordf, conn, sää)
+        # Ennustusten skaalaus
         ennustus2h, ennustus3h, ennustus6h = arehelper.predictive_model.prepare_data(dfennustus)
         ennustus2h = arehelper.predictive_model.scale_data2(ennustus2h, mean, std)
         ennustus3h = arehelper.predictive_model.scale_data2(ennustus3h, mean, std)
         ennustus6h = arehelper.predictive_model.scale_data2(ennustus6h, mean, std)
-    
-    
-    
-        ## Predict Humidity ##
-        # DecisionTree
-        dec_pred2h_scaled = dec_reg.predict(ennustus2h)
-        dec_pred3h_scaled = dec_reg.predict(ennustus3h)
-        dec_pred6h_scaled = dec_reg.predict(ennustus6h)
         
-        dec_pred2h = (dec_pred2h_scaled * std.Kosteus) + mean.Kosteus
-        dec_pred3h = (dec_pred3h_scaled * std.Kosteus) + mean.Kosteus
-        dec_pred6h = (dec_pred6h_scaled * std.Kosteus) + mean.Kosteus
-        
+        # Predict Humidity #
+        ###################
         # RandomRegressor
-        rand_pred2h_scaled = rand_reg.predict(ennustus2h)
-        rand_pred3h_scaled = rand_reg.predict(ennustus3h)
-        rand_pred6h_scaled = rand_reg.predict(ennustus6h)
-        
+        rand_pred2h_scaled = model.predict(ennustus2h)
+        rand_pred3h_scaled = model.predict(ennustus3h)
+        rand_pred6h_scaled = model.predict(ennustus6h)
+        # Scaalataan arvot takaisin 'normaaleiksi'
         rand_pred2h = (rand_pred2h_scaled * std.Kosteus) + mean.Kosteus
         rand_pred3h = (rand_pred3h_scaled * std.Kosteus) + mean.Kosteus
         rand_pred6h = (rand_pred6h_scaled * std.Kosteus) + mean.Kosteus
     
-        # Dataframes
-        dec_predictions_df = pd.DataFrame({'Humidity in 2h': dec_pred2h,
-                                           'Humidity in 3h': dec_pred3h,
-                                           'Humidity in 6h': dec_pred6h})
-        
+        # Ennustuksen tulokset
         rand_predictions_df = pd.DataFrame({'Humidity in 2h': rand_pred2h,
                                            'Humidity in 3h': rand_pred3h,
                                            'Humidity in 6h': rand_pred6h})
         
-        print(f'\nDec Predictions:{dec_predictions_df.to_numpy()}\nRand predictions: {rand_predictions_df.to_numpy()}')
+        #print(f'\nRand predictions: {rand_predictions_df.to_numpy()}')
         
-        dec_predictions_list.append(dec_predictions_df)
-        rand_predictions_list.append(rand_predictions_df)
+        # Lisätään listaan ennustukset
+        rand_predictions_dict.update({sens:rand_predictions_df})
         
+        # Jos figure=True tulee kuvaaja esiin
         if figure:
             import plotly.graph_objects as go
             import plotly.express as px
             
             fig = go.Figure()
-            fig.add_traces(go.Scatter(x=dec_predictions_df.T.index, y=dec_predictions_df.T[0]))
             fig.add_traces(go.Scatter(x=rand_predictions_df.T.index, y=rand_predictions_df.T[0]))
         
             fig.update_traces(marker={'size': 20})
@@ -346,10 +308,9 @@ def predict_museo_hum(df_list, figure=False):
                     size=18,
                     color="RebeccaPurple"))
             fig.show()
-
-    
-    return dec_predictions_list, rand_predictions_list
+            
+    print(f'Total time: {round((time.time())-start,0)} seconds')
+    return pd.concat(rand_predictions_dict, axis=0)
        
-
 
 
