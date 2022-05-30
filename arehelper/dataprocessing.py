@@ -26,37 +26,6 @@ def data_for_LSTM_model(df, scale=False):
     return df
 
 
-def create_sensordf(dataframe, dfsää, rule, prints=False):
-    """
-    Input dataframessa on oltava columnit 'Sensorid' ja 'Date'
-    Functio palauttaa dataframen jokaisesta sensorista
-    
-    """
-    sensorF1 = dataframe['Sensorid'].unique()
-    df = {name: (dataframe.loc[dataframe['Sensorid'] == name].reset_index(drop=True)) for name in sensorF1}
-    
-    #####################################################
-    if prints:
-        print(f'Found {len(sensorF1)} sensors:\n{sensorF1}\n')
-        print(f'Dataframe names:')
-    #####################################################
-    
-    # Loop list of sensorid´s
-    for s in sensorF1:
-        # Date-column to datetime format
-        df[s]['date'] = pd.to_datetime(df[s]['Date'])
-        dfsää['date'] = pd.to_datetime(dfsää['Date'])
-
-        # Resampling data based on rule(input)
-        df[s] = df[s].resample(rule=rule, on='Date').mean()
-        
-        # Säädf and sensordf into one dataframe
-        df[s] = pd.merge(dfsää,df[s], on='Date')
-        # Final dataframe names
-        print(f'df["{s}"]')
-    
-    return df
-
 
 def dataframe_to_csv(df,name):
     try:
